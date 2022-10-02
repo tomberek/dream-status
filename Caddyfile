@@ -1,0 +1,16 @@
+http://localhost:8085
+route / {
+    file_server
+}
+route /api/* {
+    reverse_proxy https://hercules-ci.com {
+        header_up Host {upstream_hostport}
+        header_down Cache-Control "public, max-age=6000, immutable"
+    }
+}
+#route /reload {
+#    header Access-Control-Allow-Origin *
+#    header Access-Control-Request-Method GET
+#    reloader
+#}
+
