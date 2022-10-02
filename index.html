@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Main</title>
+	<script src="https://unpkg.com/htmx.org@1.8.0" integrity="sha384-cZuAZ+ZbwkNRnrKi05G/fjBX+azI9DNOkNYysZ0I/X5ZFgsmMiBXgDZof30F5ofc" crossorigin="anonymous"></script>
+	<script src="https://unpkg.com/htmx.org@1.8.0/dist/ext/client-side-templates.js"></script>
+	<script src="https://unpkg.com/hyperscript.org@0.9.5/dist/_hyperscript_w9y.min.js"></script>
+	<link rel="stylesheet" href="https://the.missing.style">
+	<script src="https://unpkg.com/mustache@latest"></script>
+	<style>
+		details[data-status].jobs {
+	}
+	details[data-status="BuildFailure"].jobs {
+		display: block !important;
+	}
+	li[data-status="Failure"] {
+		color: red;
+	}
+	pre {
+		height: 10em;
+		overflow: scroll;
+	}
+	:root {
+		--line-length: 80vw;
+	}
+	</style>
+	<script type="text/hyperscript">
+    behavior TabContainer
+
+        -- init handles the default tab selection.  If a document hash exists
+        -- (and points to one of our tabs) then select it first.  Otherwise,
+        -- select the first tab in the list
+        init
+            if window.location.hash is not "" then
+                set target to the first <[aria-controls="${window.location.hash.slice(1)}"]/>
+            end
+
+            if target is null then
+                set target to first <[role=tab]/> in me
+            end
+
+            send select to target
+        end
+
+        -- move to first tab on HOME
+        on keydown[keyCode==36]
+            send select to first <[role=tab]/> in me
+
+        -- move to last tab on END
+        on keydown[keyCode==35]
+            send select to last <[role=tab]/> in me
+
+        -- move to previous tab LEFT ARROW
+        on keydown[keyCode==37]
+            set current to first <[aria-selected=true]/> in me
+            send select to previous <[role=tab]/> from current with wrapping
+
+        -- move to next tab on RIGHT ARROW
+        on keydown[keyCode==39]
+            set current to first <[aria-selected=true]/> in me
+            send select to next <[role=tab]/> from current with wrapping
+
+        -- select highlighted tab on SPACE (expected for ARIA buttons)
+        on keydown[keyCode==32]
+            send select to first <[role=tab]:focus/>
+
+        -- select highlighted tab on ENTER (additional key to select tabs)
+        on keydown[keyCode==13]
+            send select to first <[role=tab]:focus/>
+
+        -- handle mouse clicks directly on tabs
+        on mousedown(target)[button==0] from <[role=tablist] [role=tab] />
+            send select to target
+        end
+
+        -- handle touch events for phones and tablets
+        on touchstart(target) from <[role=tablist] [role=tab] />
+            send select to target
+        end
+
+        on select(target)
+            for tab in <[role=tab] /> in me
+                if tab == target
+                    add [@aria-selected="true"] to tab
+                    call window.history.replaceState(undefined, tab.innerHTML, "#" + target[@aria-controls])
+                else
+                    remove [@aria-selected] from tab
+                end
+            end
+
+            for panel in <[role=tabpanel] /> in me
+                set {hidden: (panel[@id] != target[@aria-controls])} on panel
+            end
+        end
+    end
+	</script>
+	<script>
+		htmx.defineExtension('filter-hercules-jobs', {
+    transformResponse : function(text,xhr,elt) {
+			var data = JSON.parse(text)
+			let success=[];
+			let failure=[];
+			data.attributes.forEach(function (item){
+				((item.value.Ok === undefined || item.value.Ok.status === "BuildFailure") ? failure : success).push(item)
+			})
+			data.checks = failure.filter(function(item){
+				return item.path[0] === "checks"
+			})
+			data.checksCountSuccess = success.filter(function(item){
+				return item.path[0] === "checks"
+			}).length;
+			data.checksCountFailure = data.checks.length;
+
+			data.attributes = [];
+			data.jobid = htmx.find("#jobid").dataset.jobid;
+
+			data.checks.forEach((item,index) => {
+				if (item.value && item.value.Ok && item.value.Ok.derivationPath) {
+					data.checks[index].value.Ok.derivationPath =
+					encodeURIComponent(item.value.Ok.derivationPath);
+				}
+			});
+
+			return JSON.stringify(data)
+    }
+  })
+	</script>
+</head>
+<body>
+	<main hx-ext="client-side-templates" _="install TabContainer">
+		<h2>dream2nix status</h3>
+		<template id="jobs">
+			{{ #items.0 }}
+			<img class="flex-grow:2 float:right" style="inline-size: 65px" height=40 width=40 src="{{source.committer.imageURL}}"></img>
+			<dl>
+				<dt>commit</dt><dd><a href="{{ source.link }}">{{source.link}}</a></dd>
+				<dt>message</dt><dd>{{ source.message }}</dd>
+				<dt>jobId</dt><dd id="jobid" data-jobid="{{id}}">{{id}}</dd>
+				<dt>evaluationId</dt><dd>
+					<a href="https://hercules-ci.com/github/nix-community/dream2nix-nodejs-auto/jobs/{{index}}">{{ evaluationId }}</a></dd>
+			</dl>
+			<div
+				hx-ext="filter-hercules-jobs, client-side-templates"
+				hx-get="/api/v1/jobs/{{ id }}/evaluation"
+				hx-swap="innerHTML"
+				mustache-template="builds"
+				hx-trigger="load once">
+				<marquee>loading...</marquee>
+			</div>
+			{{ /items.0 }}
+
+			<h3>Previous Evaluations</h3>
+			<ul class="jobs">
+				{{ #items }}
+				<li data-status="{{evaluationStatus}}">{{index}} - {{evaluationStatus}}
+					<a href="{{source.link}}">{{source.revision}}</a>
+				</li>
+			  {{ /items }}
+			</ul>
+		</template>
+		<template id="builds">
+			<meter style="width: 40%" _="on load
+				set @value to {{checksCountSuccess}}
+				set @max to ({{checksCountSuccess }} + {{ checksCountFailure}})
+				set $percent to (100 * (@value / @max)).toFixed(5)
+				put $percent at the start of the next <label />
+				"
+			></meter>
+			<label>% checks ( {{checksCountFailure}}/{{checksCountSuccess}} failed)</label>
+
+			{{#checks}}
+			{{#value.Ok.derivationPath}}
+			<section class="box warn"><a href="https://hercules-ci.com/accounts/github/nix-community/derivations/{{value.Ok.derivationPath}}/log?via-job={{jobid}}">
+					<h4>{{path}} : {{value.Ok.status}} {{value.Error.errorType}}</h4>
+			</a></section>
+			{{/value.Ok.derivationPath}}
+			{{^value.Ok.derivationPath}}
+			<section class="box bad">
+				<h4>{{path}} : {{value.Ok.status}} {{value.Error.errorType}}</h4>
+				<code>{{value.Error.errorMessage}}</code>
+				<details>
+					<summary>Trace</summary>
+					<pre>{{value.Error.trace}}</pre>
+				</details>
+			</section>
+			{{/value.Ok.derivationPath}}
+			{{/checks}}
+
+		</template>
+		<div role="tablist">
+			<button id="button-node" role="tab" aria-controls="node" aria-selected="true"
+				>Node</button>
+			<button id="button-rust" role="tab" aria-controls="rust"
+				>Rust</button>
+			<button id="button-python" role="tab" aria-controls="python"
+				>Python</button>
+		</div>
+
+		<div id="node" role="tabpanel" aria-labelledby="button-node"
+			mustache-template="jobs"
+			hx-swap="innerHTML"
+			hx-trigger="load"
+			hx-get="/api/v1/site/github/account/nix-community/project/dream2nix-nodejs-auto/jobs?limit=10">
+		</div>
+		<div id="rust" role="tabpanel" aria-labelledby="button-rust" hidden>
+			under construction
+		</div>
+		<div id="python" role="tabpanel" aria-labelledby="button-python" hidden>
+			under construction
+		</div>
+	</main>
+</body>
+</html>
+<!-- vim: set sw=2 ts=2 noet : -->
+
