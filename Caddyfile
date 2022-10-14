@@ -8,9 +8,15 @@ route /api/* {
         header_down Cache-Control "public, max-age=6000, immutable"
     }
 }
-#route /reload {
-#    header Access-Control-Allow-Origin *
-#    header Access-Control-Request-Method GET
-#    reloader
-#}
+route /nix-community/* {
+    reverse_proxy https://raw.githubusercontent.com {
+        header_up Host {upstream_hostport}
+        header_down Cache-Control "public, max-age=6000, immutable"
+    }
+}
+route /reload {
+    header Access-Control-Allow-Origin *
+    header Access-Control-Request-Method GET
+    reloader
+}
 

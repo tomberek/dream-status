@@ -33,6 +33,7 @@
         -- (and points to one of our tabs) then select it first.  Otherwise,
         -- select the first tab in the list
         init
+					  wait 1s
             if window.location.hash is not "" then
                 set target to the first <[aria-controls="${window.location.hash.slice(1)}"]/>
             end
@@ -131,15 +132,18 @@
 <body>
 	<main hx-ext="client-side-templates" _="install TabContainer">
 		<h2>dream2nix status</h3>
+
+
 		<template id="jobs">
 			{{ #items.0 }}
 			<img class="flex-grow:2 float:right" style="inline-size: 65px" height=40 width=40 src="{{source.committer.imageURL}}"></img>
 			<dl>
+				<dt>branch</dt><dd>{{source.ref}}</dd>
 				<dt>commit</dt><dd><a href="{{ source.link }}">{{source.link}}</a></dd>
 				<dt>message</dt><dd>{{ source.message }}</dd>
 				<dt>jobId</dt><dd id="jobid" data-jobid="{{id}}">{{id}}</dd>
 				<dt>evaluationId</dt><dd>
-					<a href="https://hercules-ci.com/github/nix-community/dream2nix-nodejs-auto/jobs/{{index}}">{{ evaluationId }}</a></dd>
+					<a href="https://hercules-ci.com/github/nix-community/dream2nix-auto-test/jobs/{{index}}">{{ evaluationId }}</a></dd>
 			</dl>
 			<div
 				hx-ext="filter-hercules-jobs, client-side-templates"
@@ -151,14 +155,14 @@
 			</div>
 			{{ /items.0 }}
 
-			<h3>Previous Evaluations</h3>
-			<ul class="jobs">
-				{{ #items }}
-				<li data-status="{{evaluationStatus}}">{{index}} - {{evaluationStatus}}
-					<a href="{{source.link}}">{{source.revision}}</a>
-				</li>
-			  {{ /items }}
-			</ul>
+			<!-- <h3>Previous Evaluations</h3> -->
+			<!-- <ul class="jobs"> -->
+			<!-- 	{{ #items }} -->
+			<!-- 	<li data-status="{{evaluationStatus}}">{{index}} - {{evaluationStatus}} -->
+			<!-- 		<a href="{{source.link}}">{{source.revision}}</a> -->
+			<!-- 	</li> -->
+			<!--   {{ /items }} -->
+			<!-- </ul> -->
 		</template>
 		<template id="builds">
 			<meter style="width: 40%" _="on load
@@ -166,10 +170,13 @@
 				set @max to ({{checksCountSuccess }} + {{ checksCountFailure}})
 				set $percent to (100 * (@value / @max)).toFixed(5)
 				put $percent at the start of the next <label />
+				put {{checksCountFailure}} into the next <summary > span />
 				"
 			></meter>
 			<label>% checks ( {{checksCountFailure}}/{{checksCountSuccess}} failed)</label>
 
+			<details>
+				<summary>Build Failures (<span>...</span>)</summary>
 			{{#checks}}
 			{{#value.Ok.derivationPath}}
 			<section class="box warn"><a href="https://hercules-ci.com/accounts/github/nix-community/derivations/{{value.Ok.derivationPath}}/log?via-job={{jobid}}">
@@ -187,30 +194,77 @@
 			</section>
 			{{/value.Ok.derivationPath}}
 			{{/checks}}
+			</details>
 
 		</template>
+
+
+		<template id="branches">
+		<div
+				_="install TabContainer">
 		<div role="tablist">
-			<button id="button-node" role="tab" aria-controls="node" aria-selected="true"
-				>Node</button>
-			<button id="button-rust" role="tab" aria-controls="rust"
-				>Rust</button>
-			<button id="button-python" role="tab" aria-controls="python"
-				>Python</button>
+			{{ #.}}
+			<button id="button-{{name}}" role="tab" aria-controls="{{name}}" aria-selected="false">{{name}}</button>
+			{{ /.}}
 		</div>
 
-		<div id="node" role="tabpanel" aria-labelledby="button-node"
+			{{ #.}}
+			<div id="{{name}}" role="tabpanel" aria-labelledby="button-{{name}}"
 			mustache-template="jobs"
-			hx-swap="innerHTML"
+			hx-swap="afterbegin"
 			hx-trigger="load"
-			hx-get="/api/v1/site/github/account/nix-community/project/dream2nix-nodejs-auto/jobs?limit=10">
+			hx-get="/api/v1/site/github/account/nix-community/project/dream2nix-auto-test/jobs?limit=5&ref=refs/heads/{{name}}"
+			hidden
+			>
+			<!-- {{name}} {{indexer}} {{number}} {{platform}} {{urlSuffix}} -->
+			{{={% %}=}}
+			<template id="translation-errors-{%name%}">
+			<details>
+				<summary>Translation Errors (<span id="{%name%}-translation-error-count">...</span>)</summary>
+				{{ #. }}
+				<details>
+					<summary>{%name%} - {{.}}
+					</summary>
+					<pre hx-get="/nix-community/dream2nix-auto-test/{%name%}/translation-errors/{{.}}"
+						hx-trigger="intersect once"
+						hx-swap=innerHTML"
+						hx-ext="ignore: client-side-templates"
+					>....loading data from {%name%}</pre>
+				</details>
+				{{ /. }}
+				</details>
+			</template>
+			{%={{ }}=%}
+			<section hx-get="/nix-community/dream2nix-auto-test/{{name}}/translation-errors.json"
+				hx-trigger="intersect once"
+				hx-swap="innerHTML"
+				mustache-template="translation-errors-{{name}}"
+				_="on htmx:afterSwap
+					 put (<details > details/> in me).length into #{{name}}-translation-error-count"
+				>....loading data from {{name}}</section>
+		<span>{{number}} total tests</span>
 		</div>
-		<div id="rust" role="tabpanel" aria-labelledby="button-rust" hidden>
-			under construction
+			{{ /.}}
 		</div>
-		<div id="python" role="tabpanel" aria-labelledby="button-python" hidden>
-			under construction
-		</div>
+		</template>
+		<section hx-get="/nix-community/dream2nix-auto-test/main/indexes.json"
+			hx-trigger="load once"
+			mustache-template="branches"
+			>....loading</section>
 	</main>
+	<script type="text/hyperscript">
+eventsource Reloader from http://localhost:8085/reload
+    on message
+        call location.reload()
+    end
+    on error
+        log "error with connecting to reload SSE"
+    end
+    on close
+        log "closing reload SSE"
+    end
+end
+</script>
 </body>
 </html>
 <!-- vim: set sw=2 ts=2 noet : -->
